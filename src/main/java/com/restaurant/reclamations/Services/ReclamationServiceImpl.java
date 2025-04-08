@@ -120,27 +120,48 @@ public class ReclamationServiceImpl implements ReclamationService {
 
     @Override
     public ReclamationDTO updateStatus(Long id, StatusReclamation newStatus, String comment) {
+        log.info("Attempting to update status for reclamation {} to {} with comment: {}", id, newStatus, comment);
+        
         Reclamation reclamation = reclamationRepository.findById(id)
-            .orElseThrow(() -> new RuntimeException("Réclamation non trouvée"));
+            .orElseThrow(() -> {
+                log.error("Reclamation not found with ID: {}", id);
+                return new RuntimeException("Réclamation non trouvée avec l'ID: " + id);
+            });
 
+        log.info("Found reclamation: {}", reclamation);
+
+        // Create history entry
         StatusHistory history = new StatusHistory();
         history.setReclamation(reclamation);
-        history.setOldStatus(reclamation.getStatus());
+        history.setOldStatus(StatusReclamation.valueOf(reclamation.getStatus().name()));
         history.setNewStatus(newStatus);
         history.setComment(comment);
+        history.setChangeDate(LocalDateTime.now());
 
-        // Save the history
-        statusHistoryRepository.save(history);
-
+        // Update reclamation status
         reclamation.setStatus(newStatus);
         if (newStatus == StatusReclamation.RESOLU) {
             reclamation.setDateResolution(LocalDateTime.now());
         }
 
-        reclamation = reclamationRepository.save(reclamation);
-        notifyUserStatusChange(id);
-        
-        return new ReclamationDTO(reclamation);
+        try {
+            // Save both entities
+            statusHistoryRepository.save(history);
+            reclamation = reclamationRepository.save(reclamation);
+            
+            // Attempt to notify user
+            try {
+                notifyUserStatusChange(id);
+            } catch (Exception e) {
+                log.warn("Failed to send notification, but status was updated: {}", e.getMessage());
+            }
+
+            log.info("Successfully updated status for reclamation {}", id);
+            return new ReclamationDTO(reclamation);
+        } catch (Exception e) {
+            log.error("Failed to update status: {}", e.getMessage());
+            throw new RuntimeException("Failed to update status: " + e.getMessage());
+        }
     }
 
     @Override

@@ -13,11 +13,13 @@ import java.time.LocalDateTime;
 import java.util.Map;
 import com.restaurant.reclamations.Entities.StatusReclamation;
 import org.springframework.format.annotation.DateTimeFormat;
+import lombok.extern.slf4j.Slf4j;
 
 @RestController
 @RequestMapping("/reclamations")  
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
+@Slf4j
 public class ReclamationController {
 
     private final ReclamationService reclamationService;
@@ -90,15 +92,19 @@ public class ReclamationController {
     @PutMapping("/{id}/status")
     public ResponseEntity<ReclamationDTO> updateStatus(
             @PathVariable Long id,
-            @RequestParam("newStatus") StatusReclamation newStatus, // Changed from status to newStatus
-            @RequestParam(required = false) String comment) {
+            @RequestParam StatusReclamation newStatus,
+            @RequestParam(required = false, defaultValue = "") String comment) {
         try {
-            System.out.println("📝 Updating status for reclamation " + id + " to " + newStatus);
+            log.info("Received status update request for reclamation {}: {} (comment: {})", 
+                     id, newStatus, comment);
+            
             ReclamationDTO updated = reclamationService.updateStatus(id, newStatus, comment);
-            System.out.println("✅ Status updated successfully");
             return ResponseEntity.ok(updated);
+        } catch (RuntimeException e) {
+            log.error("Failed to update status: {}", e.getMessage());
+            return ResponseEntity.notFound().build();
         } catch (Exception e) {
-            System.err.println("❌ Update status error: " + e.getMessage());
+            log.error("Unexpected error during status update: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
