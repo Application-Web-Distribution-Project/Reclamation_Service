@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 public class ReclamationDTO {
     private Long id;
     private Long userId;
-    private Long commandeId;
+    private String commandeId; // Modifié de Long à String pour correspondre à MongoDB
     private String description;
     private StatusReclamation status;
     private LocalDateTime dateCreation;

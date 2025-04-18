@@ -22,7 +22,7 @@ public class Reclamation {
     Long id;
 
     Long userId; // Stocke uniquement l'ID de l'utilisateur (microservice User)
-    Long commandeId; // Stocke uniquement l'ID de la commande (microservice Commande)
+    String commandeId; // Modifié de Long à String pour correspondre à MongoDB
 
     String description;
 

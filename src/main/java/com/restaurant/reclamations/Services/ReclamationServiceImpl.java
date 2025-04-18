@@ -18,7 +18,6 @@ import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.HashMap;
 
-// Add these imports
 import com.restaurant.reclamations.Entities.StatusHistory;
 import com.restaurant.reclamations.Entities.StatusReclamation;
 import com.restaurant.reclamations.Repositories.StatusHistoryRepository;
@@ -30,7 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ReclamationServiceImpl implements ReclamationService {
 
     private final ReclamationRepository reclamationRepository;
-    private final StatusHistoryRepository statusHistoryRepository; // Add this
+    private final StatusHistoryRepository statusHistoryRepository;
     private final UserClient userClient;
     private final CommandeClient commandeClient;
     private final NotificationService notificationService;
@@ -42,7 +41,7 @@ public class ReclamationServiceImpl implements ReclamationService {
         if (reclamationDTO.getUserId() == null || reclamationDTO.getUserId() == 0) {
             throw new RuntimeException("UserId invalide !");
         }
-        if (reclamationDTO.getCommandeId() == null || reclamationDTO.getCommandeId() == 0) {
+        if (reclamationDTO.getCommandeId() == null || reclamationDTO.getCommandeId().isEmpty()) {
             throw new RuntimeException("CommandeId invalide !");
         }
 
@@ -55,15 +54,16 @@ public class ReclamationServiceImpl implements ReclamationService {
 
         reclamation = reclamationRepository.save(reclamation);
 
-        // 🔍 Récupération de l'utilisateur depuis le mock server
+        // 🔍 Récupération de l'utilisateur et de la commande
         try {
             UserDTO user = userClient.getUserById(reclamationDTO.getUserId());
-            // Use the user object
             System.out.println("✅ User found: " + user);
-            // Use commandeClient
+            
+            // Use commandeClient with String ID
             commandeClient.getCommandeById(reclamationDTO.getCommandeId());
+            System.out.println("✅ Commande found with ID: " + reclamationDTO.getCommandeId());
         } catch (FeignException e) {
-            System.err.println("❌ [Feign] Erreur lors de l'appel à UserClient : " + e.getMessage());
+            System.err.println("❌ [Feign] Erreur lors de l'appel aux services: " + e.getMessage());
         }
 
         return new ReclamationDTO(reclamation);
@@ -88,9 +88,15 @@ public class ReclamationServiceImpl implements ReclamationService {
             UserDTO user = userClient.getUserById(reclamation.getUserId());
             System.out.println("✅ [Feign] Utilisateur récupéré : " + user);
             dto.setUser(user);
+            
+            // Récupération des détails de la commande
+            System.out.println("🔍 [Feign] Récupération des infos commande...");
+            dto.setCommande(commandeClient.getCommandeById(reclamation.getCommandeId()));
+            System.out.println("✅ [Feign] Commande récupérée avec ID: " + reclamation.getCommandeId());
         } catch (FeignException e) {
-            System.err.println("❌ [Feign] Erreur lors de l'appel à UserClient : " + e.getMessage());
-            dto.setUser(new UserDTO()); // Définit un objet vide pour éviter une erreur
+            System.err.println("❌ [Feign] Erreur lors de l'appel aux services: " + e.getMessage());
+            // Définit des objets vides pour éviter des erreurs
+            if (dto.getUser() == null) dto.setUser(new UserDTO());
         }
 
         return dto;
@@ -172,7 +178,19 @@ public class ReclamationServiceImpl implements ReclamationService {
         for (Object[] stat : stats) {
             StatusReclamation status = (StatusReclamation) stat[0];
             Long count = (Long) stat[1];
-            statsMap.put(status, count);
+            // Skip null keys to avoid serialization error
+            if (status != null) {
+                statsMap.put(status, count);
+            } else {
+                log.warn("Encountered null status in reclamation stats with count: {}", count);
+            }
+        }
+        
+        // Make sure all status values are represented (even with zero counts)
+        for (StatusReclamation status : StatusReclamation.values()) {
+            if (!statsMap.containsKey(status)) {
+                statsMap.put(status, 0L);
+            }
         }
         
         return statsMap;
@@ -190,7 +208,7 @@ public class ReclamationServiceImpl implements ReclamationService {
                 "aymenbog9@gmail.com",
                 reclamationId,
                 reclamation.getStatus().toString(),
-                "Mise à jour de votre réclamation" // Ajout du commentaire manquant
+                "Mise à jour de votre réclamation" 
             );
             
             System.out.println("✅ Notification envoyée pour la réclamation " + reclamationId);
