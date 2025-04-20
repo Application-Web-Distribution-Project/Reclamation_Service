@@ -9,7 +9,12 @@ import com.restaurant.reclamations.Clients.CommandeClient;
 import feign.FeignException;
 import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
@@ -38,35 +43,75 @@ public class ReclamationServiceImpl implements ReclamationService {
     public ReclamationDTO createReclamation(ReclamationDTO reclamationDTO) {
         System.out.println("📩 Nouvelle réclamation reçue : " + reclamationDTO);
 
-        if (reclamationDTO.getUserId() == null || reclamationDTO.getUserId() == 0) {
-            throw new RuntimeException("UserId invalide !");
+        // Récupérer l'ID utilisateur depuis le contexte de sécurité
+        String userId = getCurrentUserId();
+        log.info("Creating reclamation for authenticated user with ID: {}", userId);
+
+        // Si aucun utilisateur n'est authentifié, vérifier si l'ID est fourni dans le DTO
+        if (userId == null) {
+            userId = reclamationDTO.getUserId();
+            if (userId == null || userId.isEmpty()) {
+                throw new RuntimeException("UserId invalide ! Aucun utilisateur authentifié ou spécifié dans la requête.");
+            }
+        } else {
+            // Toujours définir l'ID utilisateur du contexte de sécurité dans le DTO
+            reclamationDTO.setUserId(userId);
         }
+
+        // Vérifier que la commande est spécifiée
         if (reclamationDTO.getCommandeId() == null || reclamationDTO.getCommandeId().isEmpty()) {
             throw new RuntimeException("CommandeId invalide !");
         }
 
         // Sauvegarde en base de données
         Reclamation reclamation = new Reclamation();
-        reclamation.setUserId(reclamationDTO.getUserId());
+        reclamation.setUserId(userId);
         reclamation.setCommandeId(reclamationDTO.getCommandeId());
         reclamation.setDescription(reclamationDTO.getDescription());
-        reclamation.setStatus(reclamationDTO.getStatus());
+        reclamation.setStatus(StatusReclamation.EN_ATTENTE); // Utiliser EN_ATTENTE comme statut initial
+        reclamation.setDateCreation(LocalDateTime.now());
 
         reclamation = reclamationRepository.save(reclamation);
 
-        // 🔍 Récupération de l'utilisateur et de la commande
+        // Retourner le DTO avec les détails de l'utilisateur
+        ReclamationDTO responseDTO = new ReclamationDTO();
+        responseDTO.setId(reclamation.getId());
+        responseDTO.setUserId(reclamation.getUserId());
+        responseDTO.setCommandeId(reclamation.getCommandeId());
+        responseDTO.setDescription(reclamation.getDescription());
+        responseDTO.setStatus(reclamation.getStatus());
+        responseDTO.setDateCreation(reclamation.getDateCreation());
+
         try {
-            UserDTO user = userClient.getUserById(reclamationDTO.getUserId());
-            System.out.println("✅ User found: " + user);
-            
-            // Use commandeClient with String ID
-            commandeClient.getCommandeById(reclamationDTO.getCommandeId());
-            System.out.println("✅ Commande found with ID: " + reclamationDTO.getCommandeId());
-        } catch (FeignException e) {
-            System.err.println("❌ [Feign] Erreur lors de l'appel aux services: " + e.getMessage());
+            // Récupérer les détails de l'utilisateur
+            UserDTO user = userClient.getUserById(userId);
+            responseDTO.setUser(user);
+            log.info("User details retrieved: {}", user);
+        } catch (Exception e) {
+            log.error("Error retrieving user details: {}", e.getMessage());
         }
 
-        return new ReclamationDTO(reclamation);
+        return responseDTO;
+    }
+
+    // Méthode utilitaire pour récupérer l'ID utilisateur courant depuis le contexte de sécurité
+    private String getCurrentUserId() {
+        try {
+            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+            if (authentication != null && authentication.isAuthenticated()) {
+                Object principal = authentication.getPrincipal();
+                if (principal instanceof String) {
+                    log.debug("Retrieved user ID from security context: {}", principal);
+                    return (String) principal;
+                }
+                log.warn("Principal is not a String but: {}", principal != null ? principal.getClass().getName() : "null");
+            } else {
+                log.warn("No authenticated user found in security context");
+            }
+        } catch (Exception e) {
+            log.error("Error retrieving current user: {}", e.getMessage());
+        }
+        return null;
     }
 
     @Override
@@ -89,9 +134,26 @@ public class ReclamationServiceImpl implements ReclamationService {
             System.out.println("✅ [Feign] Utilisateur récupéré : " + user);
             dto.setUser(user);
             
-            // Récupération des détails de la commande
+            // Récupération des détails de la commande avec l'identifiant du service
             System.out.println("🔍 [Feign] Récupération des infos commande...");
-            dto.setCommande(commandeClient.getCommandeById(reclamation.getCommandeId()));
+            
+            // Extract current request authorization token if available
+            String authToken = extractAuthorizationToken();
+            if (authToken != null) {
+                log.debug("Authorization token found, forwarding to commandes-service");
+                dto.setCommande(commandeClient.getCommandeByIdWithAuth(
+                    reclamation.getCommandeId(), 
+                    "reclamations-service",
+                    "Bearer " + authToken
+                ));
+            } else {
+                log.debug("No authorization token available, using only client ID");
+                dto.setCommande(commandeClient.getCommandeByIdBasic(
+                    reclamation.getCommandeId(), 
+                    "reclamations-service"
+                ));
+            }
+            
             System.out.println("✅ [Feign] Commande récupérée avec ID: " + reclamation.getCommandeId());
         } catch (FeignException e) {
             System.err.println("❌ [Feign] Erreur lors de l'appel aux services: " + e.getMessage());
@@ -100,6 +162,27 @@ public class ReclamationServiceImpl implements ReclamationService {
         }
 
         return dto;
+    }
+    
+    /**
+     * Extracts the JWT token from the current request's Authorization header
+     * @return the JWT token without the "Bearer " prefix, or null if not found
+     */
+    private String extractAuthorizationToken() {
+        try {
+            ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+            if (attributes != null) {
+                HttpServletRequest request = attributes.getRequest();
+                String authHeader = request.getHeader("Authorization");
+                
+                if (authHeader != null && authHeader.startsWith("Bearer ")) {
+                    return authHeader.substring(7); // Remove "Bearer " prefix
+                }
+            }
+        } catch (Exception e) {
+            log.error("Error extracting authorization token: {}", e.getMessage());
+        }
+        return null;
     }
 
     @Override
@@ -204,14 +287,39 @@ public class ReclamationServiceImpl implements ReclamationService {
             Reclamation reclamation = reclamationRepository.findById(reclamationId)
                 .orElseThrow(() -> new RuntimeException("Réclamation non trouvée"));
             
-            notificationService.sendStatusUpdateEmail(
-                "aymenbog9@gmail.com",
-                reclamationId,
-                reclamation.getStatus().toString(),
-                "Mise à jour de votre réclamation" 
-            );
-            
-            System.out.println("✅ Notification envoyée pour la réclamation " + reclamationId);
+            // Obtenir les informations d'utilisateur pour récupérer son email
+            try {
+                // L'ID est déjà une chaîne, pas besoin de conversion
+                UserDTO user = userClient.getUserById(reclamation.getUserId());
+                if (user != null && user.getEmail() != null) {
+                    // Utiliser l'email de l'utilisateur au lieu d'un email en dur
+                    notificationService.sendStatusUpdateEmail(
+                        user.getEmail(),
+                        reclamationId,
+                        reclamation.getStatus().toString(),
+                        user.getNom() // Utiliser le nom de l'utilisateur comme nom du client
+                    );
+                    System.out.println("✅ Notification envoyée à " + user.getEmail() + " pour la réclamation " + reclamationId);
+                } else {
+                    System.err.println("❌ Email utilisateur non disponible pour userId: " + reclamation.getUserId());
+                    // Fallback à l'email par défaut si l'email de l'utilisateur n'est pas disponible
+                    notificationService.sendStatusUpdateEmail(
+                        "aymenbog9@gmail.com", 
+                        reclamationId,
+                        reclamation.getStatus().toString(),
+                        "Client"
+                    );
+                }
+            } catch (Exception e) {
+                System.err.println("❌ Impossible de récupérer l'utilisateur: " + e.getMessage());
+                // Fallback à l'email par défaut en cas d'erreur
+                notificationService.sendStatusUpdateEmail(
+                    "aymenbog9@gmail.com",
+                    reclamationId,
+                    reclamation.getStatus().toString(),
+                    "Client" 
+                );
+            }
             
         } catch (Exception e) {
             System.err.println("❌ Erreur lors de la notification: " + e.getMessage());

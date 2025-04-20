@@ -68,7 +68,7 @@ public class ReclamationController {
             return ResponseEntity.notFound().build();
         }
     }
-
+    
     @GetMapping("/search")
     public ResponseEntity<Page<ReclamationDTO>> searchReclamations(
             @RequestParam(required = false) String keyword,

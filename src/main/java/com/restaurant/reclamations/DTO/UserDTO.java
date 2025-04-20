@@ -7,11 +7,13 @@ import lombok.*;
 @Setter
 @AllArgsConstructor
 @NoArgsConstructor
+@ToString
 public class UserDTO {
-    private Long id;
-
-    @JsonProperty("name") // Associe "name" du JSON à "nom" dans l'objet
+    private String id; // Changé de Long à String pour correspondre au type dans User Service
     private String nom;
-
+    private String prenom;
     private String email;
+    private String role;
+    
+    // Pas de champ password pour des raisons de sécurité dans les DTOs
 }

@@ -10,9 +10,17 @@ import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 public interface ReclamationRepository extends JpaRepository<Reclamation, Long> {
     List<Reclamation> findByStatus(StatusReclamation status);
+    Page<Reclamation> findByStatus(StatusReclamation status, Pageable pageable);
+    
+    // Recherche par texte dans la description
+    Page<Reclamation> findByDescriptionContainingIgnoreCase(String keyword, Pageable pageable);
+    
+    // Recherche par date
+    Page<Reclamation> findByDateCreationBetween(LocalDateTime startDate, LocalDateTime endDate, Pageable pageable);
 
     // Recherche avancée
     @Query("SELECT r FROM Reclamation r WHERE " +
@@ -31,6 +39,23 @@ public interface ReclamationRepository extends JpaRepository<Reclamation, Long> 
     // Statistiques
     @Query("SELECT r.status as status, COUNT(r) as count FROM Reclamation r GROUP BY r.status")
     List<Object[]> getReclamationStats();
+    
+    // Méthode pour obtenir les statistiques sous forme de Map
+    @SuppressWarnings("unchecked")
+    default Map<StatusReclamation, Long> countByStatus() {
+        return Map.of(
+            StatusReclamation.EN_ATTENTE, count(StatusReclamation.EN_ATTENTE),
+            StatusReclamation.EN_COURS, count(StatusReclamation.EN_COURS),
+            StatusReclamation.RESOLU, count(StatusReclamation.RESOLU)
+        );
+    }
+    
+    // Méthode auxiliaire pour compter par statut
+    default Long count(StatusReclamation status) {
+        return countByStatus(status);
+    }
+    
+    Long countByStatus(StatusReclamation status);
 }
 
 

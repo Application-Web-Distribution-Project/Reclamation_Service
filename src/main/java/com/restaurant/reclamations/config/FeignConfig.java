@@ -19,20 +19,20 @@ public class FeignConfig {
 
     @Bean
     public Logger.Level feignLoggerLevel() {
-        return Logger.Level.FULL; // Active les logs détaillés
+        return Logger.Level.FULL; // Active les logs détaillés pour mieux déboguer
     }
 
     @Bean
     public Decoder feignDecoder() {
         MappingJackson2HttpMessageConverter converter = new MappingJackson2HttpMessageConverter();
-        converter.setSupportedMediaTypes(List.of(MediaType.APPLICATION_JSON, MediaType.TEXT_HTML)); // Ajoute text/html
+        converter.setSupportedMediaTypes(List.of(MediaType.APPLICATION_JSON, MediaType.TEXT_HTML)); // Accepte les réponses HTML
 
         return new SpringDecoder(() -> new HttpMessageConverters(converter));
     }
 
     @Bean
     public ErrorDecoder errorDecoder() {
-        return new CustomErrorDecoder(); // Register the custom error decoder
+        return new CustomErrorDecoder();
     }
 
     @Component
@@ -40,11 +40,27 @@ public class FeignConfig {
 
         @Override
         public Exception decode(String methodKey, Response response) {
-            if (response.headers().get("Content-Type") != null && response.headers().get("Content-Type").contains("text/html")) {
-                // Handle unexpected HTML responses
-                return new RuntimeException("Received HTML response instead of JSON");
+            if (response.headers().get("Content-Type") != null && 
+                response.headers().get("Content-Type").toString().contains("text/html")) {
+                return new RuntimeException("Réponse HTML reçue au lieu de JSON. Vérifiez que le service User est correctement configuré.");
             }
-            return new Exception("Generic error");
+            
+            // Meilleure gestion des codes d'erreur
+            switch (response.status()) {
+                case 400:
+                    return new RuntimeException("Requête Invalide");
+                case 401:
+                    return new RuntimeException("Non autorisé");
+                case 403:
+                    return new RuntimeException("Accès interdit");
+                case 404:
+                    return new RuntimeException("Ressource non trouvée");
+                case 500:
+                    return new RuntimeException("Erreur interne du serveur");
+                default:
+                    return new RuntimeException("Erreur de communication avec le service: " + 
+                                                response.status() + " " + response.reason());
+            }
         }
     }
 }
