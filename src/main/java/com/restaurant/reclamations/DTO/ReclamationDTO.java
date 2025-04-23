@@ -41,4 +41,6 @@ public class ReclamationDTO {
             // Les objets user et commande seront chargés séparément via les clients Feign
         }
     }
+
+    
 }

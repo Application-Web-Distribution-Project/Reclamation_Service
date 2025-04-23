@@ -44,4 +44,6 @@ public class Reclamation {
 
     @OneToMany(mappedBy = "reclamation", cascade = CascadeType.ALL)
     private List<StatusHistory> statusHistory = new ArrayList<>();
+
+   
 }

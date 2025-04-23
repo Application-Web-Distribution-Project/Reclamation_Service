@@ -28,6 +28,12 @@ import com.restaurant.reclamations.Entities.StatusReclamation;
 import com.restaurant.reclamations.Repositories.StatusHistoryRepository;
 import lombok.extern.slf4j.Slf4j;
 
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.stereotype.Component;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.support.SendResult;
+import org.springframework.util.concurrent.ListenableFuture;
+
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -38,6 +44,8 @@ public class ReclamationServiceImpl implements ReclamationService {
     private final UserClient userClient;
     private final CommandeClient commandeClient;
     private final NotificationService notificationService;
+    private final KafkaTemplate<String, ReclamationDTO> kafkaTemplate;
+    private static final String RECLAMATION_TOPIC = "reclamation-created";
 
     @Override
     public ReclamationDTO createReclamation(ReclamationDTO reclamationDTO) {
@@ -90,6 +98,15 @@ public class ReclamationServiceImpl implements ReclamationService {
         } catch (Exception e) {
             log.error("Error retrieving user details: {}", e.getMessage());
         }
+
+        // Publish Kafka message
+        kafkaTemplate.send(RECLAMATION_TOPIC, responseDTO).whenComplete((result, ex) -> {
+            if (ex != null) {
+                log.error("Failed to publish message to topic '{}': {}", RECLAMATION_TOPIC, ex.getMessage());
+            } else {
+                log.info("Message published successfully to topic '{}': {}", RECLAMATION_TOPIC, responseDTO);
+            }
+        });
 
         return responseDTO;
     }
